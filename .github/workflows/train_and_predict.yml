@@ -13,7 +13,7 @@ on:
 jobs:
   samba-pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 300
 
     steps:
       - name: Checkout
