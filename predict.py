@@ -147,7 +147,10 @@ def generate_signal(option: str, master: pd.DataFrame) -> dict:
         "trained_at":      meta.get("trained_at", ""),
         "winning_loss":    meta.get("winning_loss", ""),
         "test_ann_return": meta.get("test_ann_return", 0),
-        "test_sharpe":     meta.get("test_sharpe", 0),
+        "test_ann_vol":    meta.get("test_ann_vol",    0),
+        "test_sharpe":     meta.get("test_sharpe",     0),
+        "test_max_dd":     meta.get("test_max_dd",     0),
+        "test_hit_rate":   meta.get("test_hit_rate",   0),
         "test_start":      meta.get("test_start", ""),
         "model_n_params":  meta.get("n_params", 0),
     }
@@ -222,6 +225,14 @@ def update_history(signal: dict, option: str) -> None:
     print(f"[predict] History: {len(history)} records for Option {option}")
 
 
+def _best_signal(sig_fixed: dict, sig_window: dict) -> dict:
+    """Return whichever signal has higher return — used for history recording."""
+    ret_f = sig_fixed.get("test_ann_return",  -999) if sig_fixed else -999
+    ret_w = sig_window.get("oos_ann_return",   -999) if sig_window else -999
+    return sig_window if (ret_w > ret_f and sig_window and "pick" in sig_window) \
+           else (sig_fixed or {})
+
+
 def save_signals(sig_A=None, sig_B=None, sig_Aw=None, sig_Bw=None):
     os.makedirs(cfg.MODELS_DIR, exist_ok=True)
     combined = {
@@ -234,17 +245,22 @@ def save_signals(sig_A=None, sig_B=None, sig_Aw=None, sig_Bw=None):
     with open(os.path.join(cfg.MODELS_DIR, "latest_signals.json"), "w") as f:
         json.dump(combined, f, indent=2)
 
-    for sig, name, opt, hist in [
-        (sig_A,  "signal_A",        "A", True),
-        (sig_B,  "signal_B",        "B", True),
-        (sig_Aw, "signal_A_window", "A", False),
-        (sig_Bw, "signal_B_window", "B", False),
+    for sig, name in [
+        (sig_A,  "signal_A"),
+        (sig_B,  "signal_B"),
+        (sig_Aw, "signal_A_window"),
+        (sig_Bw, "signal_B_window"),
     ]:
         if sig:
             with open(os.path.join(cfg.MODELS_DIR, f"{name}.json"), "w") as f:
                 json.dump(sig, f, indent=2)
-            if hist:
-                update_history(sig, opt)
+
+    # Record BEST signal (hero pick) in history — matches what app shows
+    if sig_A or sig_Aw:
+        update_history(_best_signal(sig_A, sig_Aw), "A")
+    if sig_B or sig_Bw:
+        update_history(_best_signal(sig_B, sig_Bw), "B")
+
     print("[predict] All signals saved.")
 
 
