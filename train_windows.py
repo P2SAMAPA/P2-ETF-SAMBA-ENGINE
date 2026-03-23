@@ -13,6 +13,7 @@ import time
 from datetime import datetime
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
@@ -35,9 +36,9 @@ def make_window_dataloaders(feat_dict: dict, scaler: feat.FeatureScaler,
     y       = feat_dict["y"]
     cash    = feat_dict["cash_rate"]
 
-    train_mask = (dates >= np.datetime64(train_start)) & \
-                 (dates <= np.datetime64(train_end))
-    oos_mask   = dates >= np.datetime64(oos_start)
+    train_mask = (dates >= np.datetime64(pd.Timestamp(train_start))) & \
+                 (dates <= np.datetime64(pd.Timestamp(train_end)))
+    oos_mask   = dates >= np.datetime64(pd.Timestamp(oos_start))
 
     if train_mask.sum() < cfg.LOOKBACK * 2:
         raise ValueError(f"Too few training samples: {train_mask.sum()}")
