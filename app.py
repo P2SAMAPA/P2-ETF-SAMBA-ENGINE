@@ -383,10 +383,10 @@ def render_option(option: str, signals: dict, master: pd.DataFrame):
     # Metrics from signal JSON (no app-side recompute)
     fw_metrics = {
         "ar": sig.get("test_ann_return", 0),
-        "av": 0,   # not stored in fixed split meta yet
-        "sh": sig.get("test_sharpe", 0),
-        "dd": 0,
-        "hr": 0,
+        "av": sig.get("test_ann_vol",    0),
+        "sh": sig.get("test_sharpe",     0),
+        "dd": sig.get("test_max_dd",     0),
+        "hr": sig.get("test_hit_rate",   0),
     }
     sw_metrics = {
         "ar": sigw.get("oos_ann_return", 0),
