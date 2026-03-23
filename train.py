@@ -91,11 +91,15 @@ def eval_epoch(model, dl, loss_fn_name):
             w = model(Xa, Xm)
             port_ret = (w * y_b).sum(dim=1)
             all_rets.append(port_ret.numpy())
-    r = np.concatenate(all_rets)
-    ann_ret = float(r.mean() * 252)
-    ann_vol = float(r.std() * np.sqrt(252) + 1e-8)
-    sharpe  = ann_ret / ann_vol
-    return ann_ret, sharpe
+    r        = np.concatenate(all_rets)
+    ann_ret  = float(r.mean() * 252)
+    ann_vol  = float(r.std() * np.sqrt(252) + 1e-8)
+    sharpe   = ann_ret / ann_vol
+    curve    = np.cumprod(1 + r)
+    max_dd   = float(((curve - np.maximum.accumulate(curve)) /
+                      np.maximum.accumulate(curve)).min())
+    hit_rate = float((r > 0).mean())
+    return ann_ret, sharpe, ann_vol, max_dd, hit_rate
 
 
 # ── Train one option one loss ──────────────────────────────────────────────────
@@ -136,7 +140,7 @@ def train_one(option: str, loss_fn: str, feat_dict: dict,
 
     for epoch in range(1, cfg.MAX_EPOCHS + 1):
         train_loss          = train_epoch(model, train_dl, optimizer, loss_fn)
-        val_ann_ret, val_sh = eval_epoch(model, val_dl, loss_fn)
+        val_ann_ret, val_sh, _, _, _ = eval_epoch(model, val_dl, loss_fn)
         scheduler.step(val_ann_ret)
 
         if val_ann_ret > best_val:
@@ -156,7 +160,7 @@ def train_one(option: str, loss_fn: str, feat_dict: dict,
 
     # Final test eval
     model.load_state_dict(torch.load(model_path, map_location=DEVICE))
-    test_ann_ret, test_sharpe = eval_epoch(model, test_dl, loss_fn)
+    test_ann_ret, test_sharpe, test_vol, test_dd, test_hr = eval_epoch(model, test_dl, loss_fn)
 
     n_params = count_parameters(model)
     print(f"  Result: test_ann_ret={test_ann_ret*100:.2f}% | "
@@ -166,6 +170,9 @@ def train_one(option: str, loss_fn: str, feat_dict: dict,
         "loss_fn":       loss_fn,
         "test_ann_ret":  round(test_ann_ret, 4),
         "test_sharpe":   round(test_sharpe, 4),
+        "test_ann_vol":  round(test_vol, 4),
+        "test_max_dd":   round(test_dd, 4),
+        "test_hit_rate": round(test_hr, 4),
         "model_path":    model_path,
         "scaler":        scaler,
         "n_params":      n_params,
@@ -208,10 +215,13 @@ def train_option(option: str) -> dict:
         "option":        option,
         "trained_at":    datetime.utcnow().isoformat(),
         "elapsed_sec":   round(time.time() - t0, 1),
-        "winning_loss":  winner,
+        "winning_loss":    winner,
         "test_ann_return": best["test_ann_ret"],
-        "test_sharpe":   best["test_sharpe"],
-        "test_start":    test_start,
+        "test_ann_vol":    best["test_ann_vol"],
+        "test_sharpe":     best["test_sharpe"],
+        "test_max_dd":     best["test_max_dd"],
+        "test_hit_rate":   best["test_hit_rate"],
+        "test_start":      test_start,
         "n_params":      best["n_params"],
         "n_assets":      feat_dict["n_assets"],
         "tickers":       feat_dict["tickers"],
