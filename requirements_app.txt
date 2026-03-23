@@ -1,0 +1,8 @@
+streamlit==1.44.0
+pandas
+numpy
+pyarrow
+plotly
+huggingface_hub
+altair>=5.0.0
+requests
