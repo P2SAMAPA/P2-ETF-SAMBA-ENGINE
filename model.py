@@ -55,8 +55,8 @@ class MambaBlock(nn.Module):
             bias=True,
         )
 
-        # SSM parameters
-        self.x_proj   = nn.Linear(self.d_inner, d_state * 2 + self.d_inner, bias=False)
+        # SSM parameters — x_proj outputs: d_inner (delta) + d_state (B) + d_state (C)
+        self.x_proj   = nn.Linear(self.d_inner, self.d_inner + d_state * 2, bias=False)
         self.dt_proj  = nn.Linear(self.d_inner, self.d_inner, bias=True)
 
         # A matrix (log parameterised for stability)
@@ -70,29 +70,37 @@ class MambaBlock(nn.Module):
         self.dropout  = nn.Dropout(dropout)
 
     def ssm(self, x: torch.Tensor) -> torch.Tensor:
-        """Selective state space model scan."""
-        B, L, D = x.shape
-        A = -torch.exp(self.A_log)                           # (D, N)
+        """Selective state space model scan. x: (B, L, D_inner)"""
+        B, L, D = x.shape                                    # D = d_inner
+        N = self.d_state
 
-        x_dbl = self.x_proj(x)                              # (B, L, N*2+D)
-        delta, B_param, C = x_dbl.split(
-            [self.d_inner, self.d_state, self.d_state], dim=-1
+        A = -torch.exp(self.A_log.float())                   # (D, N)
+
+        # Project to get delta, B, C
+        x_dbl  = self.x_proj(x)                             # (B, L, D+2N)
+        delta_raw, B_param, C = x_dbl.split(
+            [D, N, N], dim=-1
         )
-        delta  = F.softplus(self.dt_proj(delta))            # (B, L, D)
+        delta = F.softplus(self.dt_proj(delta_raw))          # (B, L, D)
 
-        # Discretise A and B
-        dA     = torch.exp(delta.unsqueeze(-1) * A)         # (B, L, D, N)
-        dB     = delta.unsqueeze(-1) * B_param.unsqueeze(2) # (B, L, D, N)
-
-        # Sequential scan (efficient for short sequences)
-        h = torch.zeros(B, D, self.d_state, device=x.device)
+        # Sequential scan
+        h  = torch.zeros(B, D, N, device=x.device, dtype=x.dtype)
         ys = []
         for i in range(L):
-            h = dA[:, i] * h + dB[:, i] * x[:, i:i+1, :].transpose(1, 2)
-            y = (h * C[:, i:i+1, :].unsqueeze(1)).sum(-1)  # (B, D)
-            ys.append(y)
-        y = torch.stack(ys, dim=1)                          # (B, L, D)
-        return y + x * self.D.unsqueeze(0).unsqueeze(0)    # broadcast (1,1,D)
+            # dA: (B, D, N), dB: (B, D, N)
+            dA = torch.exp(
+                delta[:, i, :].unsqueeze(-1) * A.unsqueeze(0)
+            )                                                 # (B, D, N)
+            dB = delta[:, i, :].unsqueeze(-1) * \
+                 B_param[:, i, :].unsqueeze(1)                # (B, D, N)
+            h  = dA * h + dB * x[:, i, :].unsqueeze(-1)      # (B, D, N)
+            # y_i = sum over N: h * C
+            y_i = (h * C[:, i, :].unsqueeze(1)).sum(-1)      # (B, D)
+            ys.append(y_i)
+
+        y = torch.stack(ys, dim=1)                           # (B, L, D)
+        # D skip connection: self.D is (D_inner,) → broadcast over (B, L, D)
+        return y + x * self.D.float()                        # both (B, L, D)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         residual = x
