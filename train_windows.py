@@ -112,7 +112,7 @@ def train_window(window: dict, feat_dict: dict, option: str,
 
     for epoch in range(1, cfg.MAX_EPOCHS + 1):
         train_epoch(model, train_dl, optimizer, loss_fn)
-        oos_ann_ret, oos_sharpe = eval_epoch(model, oos_dl, loss_fn)
+        oos_ann_ret, oos_sharpe, oos_vol, oos_dd, oos_hr = eval_epoch(model, oos_dl, loss_fn)
         scheduler.step(oos_ann_ret)
 
         if oos_ann_ret > best_oos:
@@ -125,21 +125,7 @@ def train_window(window: dict, feat_dict: dict, option: str,
             break
 
     model.load_state_dict(torch.load(model_path, map_location=DEVICE))
-    oos_ann_ret, oos_sharpe = eval_epoch(model, oos_dl, loss_fn)
-
-    # Full OOS metrics
-    model.eval()
-    all_rets = []
-    with torch.no_grad():
-        for Xa, Xm, y_b, c_b in oos_dl:
-            w = model(Xa, Xm)
-            all_rets.append((w * y_b).sum(dim=1).numpy())
-    r = np.concatenate(all_rets)
-    ann_vol  = float(r.std() * np.sqrt(252))
-    curve    = np.cumprod(1 + r)
-    max_dd   = float(((curve - np.maximum.accumulate(curve)) /
-                      np.maximum.accumulate(curve)).min())
-    hit_rate = float((r > 0).mean())
+    oos_ann_ret, oos_sharpe, oos_vol, oos_dd, oos_hr = eval_epoch(model, oos_dl, loss_fn)
 
     print(f"  Window {wid} result: OOS={oos_ann_ret*100:.2f}% | "
           f"Sharpe={oos_sharpe:.3f}")
@@ -150,10 +136,10 @@ def train_window(window: dict, feat_dict: dict, option: str,
         "train_end":     cfg.TRAIN_END,
         "loss_fn":       loss_fn,
         "oos_ann_return":round(oos_ann_ret, 4),
-        "oos_ann_vol":   round(ann_vol, 4),
+        "oos_ann_vol":   round(oos_vol, 4),
         "oos_sharpe":    round(oos_sharpe, 4),
-        "oos_hit_rate":  round(hit_rate, 4),
-        "oos_max_dd":    round(max_dd, 4),
+        "oos_hit_rate":  round(oos_hr, 4),
+        "oos_max_dd":    round(oos_dd, 4),
         "model_path":    model_path,
         "scaler":        scaler,
     }
