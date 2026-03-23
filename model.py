@@ -92,7 +92,7 @@ class MambaBlock(nn.Module):
             y = (h * C[:, i:i+1, :].unsqueeze(1)).sum(-1)  # (B, D)
             ys.append(y)
         y = torch.stack(ys, dim=1)                          # (B, L, D)
-        return y + x * self.D
+        return y + x * self.D.unsqueeze(0).unsqueeze(0)    # broadcast (1,1,D)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         residual = x
