@@ -11,11 +11,15 @@ on:
         default: "both"
 
 jobs:
-  train_a:
-    name: Train Option A
+  train_option:
+    name: Train Option ${{ matrix.option }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
-    if: github.event.inputs.option == 'both' || github.event.inputs.option == 'A' || github.event_name == 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        option: [A, B]
+    if: github.event.inputs.option == 'both' || github.event.inputs.option == matrix.option
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,67 +29,31 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Train fixed split for Option A
+      - name: Train fixed split for Option ${{ matrix.option }}
         env:
           HF_TOKEN:        ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
           HF_MODELS_REPO:  ${{ secrets.HF_MODELS_REPO }}
-        run: python train.py --option A
+        run: python train.py --option ${{ matrix.option }}
 
-      - name: Train shrinking windows for Option A
+      - name: Train shrinking windows for Option ${{ matrix.option }}
         env:
           HF_TOKEN:        ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
           HF_MODELS_REPO:  ${{ secrets.HF_MODELS_REPO }}
-        run: python train_windows.py --option A
+        run: python train_windows.py --option ${{ matrix.option }}
 
-      - name: Upload models as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: models-A
-          path: models/
-          retention-days: 1
-
-  train_b:
-    name: Train Option B
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-    if: github.event.inputs.option == 'both' || github.event.inputs.option == 'B' || github.event_name == 'schedule'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Train fixed split for Option B
+      - name: Upload models to Hugging Face
         env:
-          HF_TOKEN:        ${{ secrets.HF_TOKEN }}
-          HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
-          HF_MODELS_REPO:  ${{ secrets.HF_MODELS_REPO }}
-        run: python train.py --option B
-
-      - name: Train shrinking windows for Option B
-        env:
-          HF_TOKEN:        ${{ secrets.HF_TOKEN }}
-          HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
-          HF_MODELS_REPO:  ${{ secrets.HF_MODELS_REPO }}
-        run: python train_windows.py --option B
-
-      - name: Upload models as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: models-B
-          path: models/
-          retention-days: 1
+          HF_TOKEN:       ${{ secrets.HF_TOKEN }}
+          HF_MODELS_REPO: ${{ secrets.HF_MODELS_REPO }}
+        run: python upload_models.py
 
   predict_and_upload:
     name: Generate signals and upload
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    needs: [train_a, train_b]
+    needs: [train_option]
     if: always() && !cancelled()
     steps:
       - uses: actions/checkout@v4
@@ -96,19 +64,6 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Download models for Option A
-        uses: actions/download-artifact@v4
-        with:
-          name: models-A
-          path: models/
-          if-no-files-found: ignore
-      - name: Download models for Option B
-        uses: actions/download-artifact@v4
-        with:
-          name: models-B
-          path: models/
-          if-no-files-found: ignore
-
       - name: Generate signals for both options
         env:
           HF_TOKEN:        ${{ secrets.HF_TOKEN }}
@@ -116,7 +71,7 @@ jobs:
           HF_MODELS_REPO:  ${{ secrets.HF_MODELS_REPO }}
         run: python predict.py --option both
 
-      - name: Upload models and signals to HuggingFace
+      - name: Upload signals to Hugging Face
         env:
           HF_TOKEN:       ${{ secrets.HF_TOKEN }}
           HF_MODELS_REPO: ${{ secrets.HF_MODELS_REPO }}
