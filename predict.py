@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import pandas_market_calendars as mcal
 import torch
+from huggingface_hub import HfApi, hf_hub_download   # added for remote history
 
 import config as cfg
 import loader
@@ -207,20 +208,46 @@ def generate_window_signal(option: str, master: pd.DataFrame) -> dict:
 
 
 def update_history(signal: dict, option: str) -> None:
-    path = os.path.join(cfg.MODELS_DIR, f"signal_history_{option}.json")
+    """
+    Append new signal to history and upload to Hugging Face.
+    Downloads existing history from HF first.
+    """
+    # Local path
+    local_path = os.path.join(cfg.MODELS_DIR, f"signal_history_{option}.json")
     history = []
-    if os.path.exists(path):
-        with open(path) as f:
+
+    # Try to download existing history from Hugging Face
+    try:
+        downloaded = hf_hub_download(
+            repo_id=cfg.HF_MODELS_REPO,
+            filename=f"signal_history_{option}.json",
+            repo_type="dataset",
+            token=cfg.HF_TOKEN,
+            local_dir=cfg.MODELS_DIR,
+            local_dir_use_symlinks=False,
+        )
+        with open(downloaded) as f:
             history = json.load(f)
+        print(f"[predict] Loaded existing history: {len(history)} records for Option {option}")
+    except Exception as e:
+        print(f"[predict] No existing history found for Option {option} (starting fresh): {e}")
+
+    # Create new record
     record = {
         "signal_date":  signal["signal_date"],
         "pick":         signal["pick"],
         "conviction":   signal["conviction"],
         "generated_at": signal["generated_at"],
     }
+
     if record["signal_date"] not in {r["signal_date"] for r in history}:
         history.append(record)
-    with open(path, "w") as f:
+        print(f"[predict] Appended new record for {record['signal_date']}")
+    else:
+        print(f"[predict] Record for {record['signal_date']} already exists – skipping")
+
+    # Save locally
+    with open(local_path, "w") as f:
         json.dump(history, f, indent=2)
     print(f"[predict] History: {len(history)} records for Option {option}")
 
