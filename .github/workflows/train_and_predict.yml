@@ -2,7 +2,7 @@ name: SAMBA Train and Predict
 
 on:
   schedule:
-    - cron: "30 22 * * 1-5"   # 22:30 UTC Mon-Fri (same as DeePM)
+    - cron: "30 22 * * 1-5"
   workflow_dispatch:
     inputs:
       option:
@@ -11,51 +11,81 @@ on:
         default: "both"
 
 jobs:
-  samba-pipeline:
+  train_option:
+    name: Train Option ${{ matrix.option }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
-
+    strategy:
+      fail-fast: false
+      matrix:
+        option: [A, B]
+    if: github.event.inputs.option == 'both' || github.event.inputs.option == matrix.option
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
-
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Train fixed split
+      - name: Train fixed split for Option ${{ matrix.option }}
         env:
           HF_TOKEN:        ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
           HF_MODELS_REPO:  ${{ secrets.HF_MODELS_REPO }}
-        run: |
-          OPTION="${{ github.event.inputs.option || 'both' }}"
-          python train.py --option $OPTION
+        run: python train.py --option ${{ matrix.option }}
 
-      - name: Train shrinking windows
+      - name: Train shrinking windows for Option ${{ matrix.option }}
         env:
           HF_TOKEN:        ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
           HF_MODELS_REPO:  ${{ secrets.HF_MODELS_REPO }}
-        run: |
-          OPTION="${{ github.event.inputs.option || 'both' }}"
-          python train_windows.py --option $OPTION
+        run: python train_windows.py --option ${{ matrix.option }}
 
-      - name: Generate signals
+      - name: Upload models as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: models-${{ matrix.option }}
+          path: models/
+          retention-days: 1
+
+  predict_and_upload:
+    name: Generate signals and upload
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: [train_option]
+    if: always() && !cancelled()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download models for Option A
+        uses: actions/download-artifact@v4
+        with:
+          name: models-A
+          path: models/
+          if-no-files-found: ignore
+      - name: Download models for Option B
+        uses: actions/download-artifact@v4
+        with:
+          name: models-B
+          path: models/
+          if-no-files-found: ignore
+
+      - name: Generate signals for both options
         env:
           HF_TOKEN:        ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
           HF_MODELS_REPO:  ${{ secrets.HF_MODELS_REPO }}
-        run: |
-          OPTION="${{ github.event.inputs.option || 'both' }}"
-          python predict.py --option $OPTION
+        run: python predict.py --option both
 
-      - name: Upload to HuggingFace
+      - name: Upload models and signals to HuggingFace
         env:
           HF_TOKEN:       ${{ secrets.HF_TOKEN }}
           HF_MODELS_REPO: ${{ secrets.HF_MODELS_REPO }}
