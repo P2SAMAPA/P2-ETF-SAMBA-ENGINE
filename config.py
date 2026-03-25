@@ -52,8 +52,8 @@ VAL_SPLIT    = 0.15
 # TEST = remaining 15%
 
 BATCH_SIZE   = 64
-MAX_EPOCHS   = 150
-PATIENCE     = 15
+MAX_EPOCHS   = 80    # reduced from 150 to 80
+PATIENCE     = 10    # reduced from 15 to 10
 LEARNING_RATE = 1e-3
 WEIGHT_DECAY  = 1e-4
 DROPOUT       = 0.2
