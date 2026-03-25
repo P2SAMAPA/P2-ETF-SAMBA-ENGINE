@@ -90,6 +90,8 @@ def eval_epoch(model, dl, loss_fn_name):
         for Xa, Xm, y_b, c_b in dl:
             w = model(Xa, Xm)
             port_ret = (w * y_b).sum(dim=1)
+            # Replace NaN with 0 to avoid invalid metrics
+            port_ret = torch.nan_to_num(port_ret, nan=0.0)
             all_rets.append(port_ret.numpy())
     r        = np.concatenate(all_rets)
     ann_ret  = float(r.mean() * 252)
