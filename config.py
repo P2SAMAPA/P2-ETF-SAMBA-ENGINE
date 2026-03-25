@@ -33,7 +33,7 @@ LOOKBACK    = 60      # trading days of history per sample
 PRED_HORIZON = 1      # predict next day's best ETF
 
 # ── Mamba config ───────────────────────────────────────────────────────────────
-D_MODEL       = 64    # Mamba model dimension
+D_MODEL       = 32    # Mamba model dimension
 D_STATE       = 16    # SSM state dimension
 D_CONV        = 4     # local conv width in Mamba
 EXPAND        = 2     # expansion factor in Mamba
