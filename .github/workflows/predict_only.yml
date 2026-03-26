@@ -1,0 +1,64 @@
+name: SAMBA Predict Only (No Retraining)
+
+on:
+  schedule:
+    - cron: "45 21 * * 1-5"   # 21:45 UTC Mon–Fri, after market close
+  workflow_dispatch:
+    inputs: {}
+
+jobs:
+  predict_and_upload:
+    name: Generate signals from existing models
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download models from Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_MODELS_REPO: ${{ secrets.HF_MODELS_REPO }}
+        run: |
+          mkdir -p models
+          python << 'PYEOF'
+          import os
+          from huggingface_hub import HfApi, hf_hub_download
+          api = HfApi()
+          repo_id = os.getenv("HF_MODELS_REPO")
+          token = os.getenv("HF_TOKEN")
+          files = api.list_repo_files(repo_id=repo_id, repo_type="dataset", token=token)
+          for f in files:
+            if f.startswith("models/"):
+              hf_hub_download(
+                repo_id=repo_id,
+                filename=f,
+                repo_type="dataset",
+                token=token,
+                local_dir=".",
+                local_dir_use_symlinks=False,
+                force_download=True
+              )
+              print(f"Downloaded {f}")
+          PYEOF
+
+      - name: Generate signals
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
+          HF_MODELS_REPO: ${{ secrets.HF_MODELS_REPO }}
+        run: python predict.py --option both
+
+      - name: Upload signals to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_MODELS_REPO: ${{ secrets.HF_MODELS_REPO }}
+        run: python upload_models.py
+
+      - name: Done
+        run: echo "Prediction complete. New signals uploaded."
