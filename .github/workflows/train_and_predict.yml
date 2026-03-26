@@ -2,7 +2,7 @@ name: SAMBA Train and Predict
 
 on:
   schedule:
-    - cron: "30 22 * * 1-5"
+    - cron: "30 22 * * 1-5"   # Monday–Friday at 22:30 UTC
   workflow_dispatch:
     inputs:
       option:
@@ -78,7 +78,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [train_a, train_b]
-    if: always() && !cancelled()
+    if: always() && !cancelled() && needs.train_a.result == 'success' && needs.train_b.result == 'success'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
