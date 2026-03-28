@@ -11,16 +11,19 @@ jobs:
     name: Generate signals from existing models
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
+
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Download models from Hugging Face
+      - name: Download models from Hugging Face (with retries)
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_MODELS_REPO: ${{ secrets.HF_MODELS_REPO }}
@@ -28,23 +31,41 @@ jobs:
           mkdir -p models
           python << 'PYEOF'
           import os
+          import time
+          import httpx
           from huggingface_hub import HfApi, hf_hub_download
-          api = HfApi()
-          repo_id = os.getenv("HF_MODELS_REPO")
-          token = os.getenv("HF_TOKEN")
-          files = api.list_repo_files(repo_id=repo_id, repo_type="dataset", token=token)
-          for f in files:
-            if f.startswith("models/"):
-              hf_hub_download(
-                repo_id=repo_id,
-                filename=f,
-                repo_type="dataset",
-                token=token,
-                local_dir=".",
-                local_dir_use_symlinks=False,
-                force_download=True
-              )
-              print(f"Downloaded {f}")
+
+          api      = HfApi()
+          repo_id  = os.getenv("HF_MODELS_REPO")
+          token    = os.getenv("HF_TOKEN")
+          files    = api.list_repo_files(repo_id=repo_id, repo_type="dataset", token=token)
+          model_files = [f for f in files if f.startswith("models/")]
+
+          MAX_RETRIES = 3
+          RETRY_DELAY = 10   # seconds between retries
+
+          for f in model_files:
+              for attempt in range(1, MAX_RETRIES + 1):
+                  try:
+                      hf_hub_download(
+                          repo_id=repo_id,
+                          filename=f,
+                          repo_type="dataset",
+                          token=token,
+                          local_dir=".",
+                          local_dir_use_symlinks=False,
+                          force_download=True,
+                      )
+                      print(f"Downloaded {f}")
+                      break   # success — move to next file
+                  except Exception as e:
+                      if attempt < MAX_RETRIES:
+                          print(f"  ⚠️  Attempt {attempt} failed for {f}: {e}")
+                          print(f"  Retrying in {RETRY_DELAY}s...")
+                          time.sleep(RETRY_DELAY)
+                      else:
+                          print(f"  ❌ All {MAX_RETRIES} attempts failed for {f}: {e}")
+                          raise   # re-raise after final attempt
           PYEOF
 
       - name: Generate signals
