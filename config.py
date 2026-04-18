@@ -21,7 +21,7 @@ FI_BENCHMARK = "AGG"
 # ── Option B — Equity Sectors ──────────────────────────────────────────────────
 EQ_ETFS = [
     "SPY", "QQQ", "XLK", "XLF", "XLE", "XLV",
-    "XLI", "XLY", "XLP", "XLU", "GDX", "XME",
+    "XLI", "XLY", "XLP", "XLU", "GDX", "IWF", "IWM", "XSD", "XBI", "XME",
 ]
 EQ_BENCHMARK = "SPY"
 
