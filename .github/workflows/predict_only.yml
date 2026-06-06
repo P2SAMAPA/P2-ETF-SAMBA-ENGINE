@@ -2,7 +2,7 @@ name: SAMBA Predict Only (No Retraining)
 
 on:
   schedule:
-    - cron: "45 00 * * 1-6"   # 21:45 UTC Mon–Fri, after market close
+    - cron: "45 05 * * 1-6"   # 21:45 UTC Mon–Fri, after market close
   workflow_dispatch:
     inputs: {}
 
