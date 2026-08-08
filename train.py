@@ -139,6 +139,7 @@ def train_one(option: str, loss_fn: str, feat_dict: dict,
                               f"samba_option{option}_{loss_fn}_best.pt")
     best_val   = -float("inf")
     patience   = 0
+    run_t0     = time.time()
 
     for epoch in range(1, cfg.MAX_EPOCHS + 1):
         train_loss          = train_epoch(model, train_dl, optimizer, loss_fn)
@@ -154,6 +155,15 @@ def train_one(option: str, loss_fn: str, feat_dict: dict,
 
         if patience >= cfg.PATIENCE:
             print(f"    Early stop at epoch {epoch}")
+            break
+
+        # Defense-in-depth: same wall-clock cap as train_windows.py, so one
+        # noisy run (val_ann_ret never plateauing cleanly) can't silently eat
+        # the whole job's timeout.
+        if time.time() - run_t0 > cfg.MAX_SECONDS_PER_TRAINING_RUN:
+            print(f"    Hit MAX_SECONDS_PER_TRAINING_RUN "
+                  f"({cfg.MAX_SECONDS_PER_TRAINING_RUN}s) at epoch {epoch} — "
+                  f"stopping early with best-so-far model.")
             break
 
         if epoch % 20 == 0:
