@@ -11,6 +11,7 @@ on:
         default: "both"
 
 jobs:
+  # ── Option A (FI, 8 tickers) — already fits comfortably in one job ─────────
   train_a:
     name: Train Option A
     runs-on: ubuntu-latest
@@ -42,10 +43,14 @@ jobs:
           HF_MODELS_REPO: ${{ secrets.HF_MODELS_REPO }}
         run: python upload_models.py
 
-  train_b:
-    name: Train Option B
+  # ── Option B (Equity, 22 tickers) — split into fixed-split + parallel ──────
+  # window matrix + aggregate, since running all 8 windows serially overshoots
+  # the 6-hour free-tier CPU limit for this larger ticker universe.
+
+  train_b_fixed:
+    name: Train Option B — fixed split
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 120
     if: github.event.inputs.option == 'both' || github.event.inputs.option == 'B' || github.event_name == 'schedule'
     steps:
       - uses: actions/checkout@v4
@@ -61,12 +66,76 @@ jobs:
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
           HF_MODELS_REPO:  ${{ secrets.HF_MODELS_REPO }}
         run: python train.py --option B
-      - name: Train shrinking windows for Option B
+      - name: Upload fixed-split artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: samba-b-fixed
+          path: models
+          retention-days: 1
+
+  train_b_windows:
+    name: Train Option B — window ${{ matrix.window }}
+    needs: train_b_fixed
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        window: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Download fixed-split artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: samba-b-fixed
+          path: models
+      - name: Train window ${{ matrix.window }}
         env:
           HF_TOKEN:        ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
           HF_MODELS_REPO:  ${{ secrets.HF_MODELS_REPO }}
-        run: python train_windows.py --option B
+        run: python train_windows.py --option B --window ${{ matrix.window }}
+      - name: Upload window ${{ matrix.window }} artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: samba-b-window-${{ matrix.window }}
+          path: models
+          retention-days: 1
+
+  aggregate_b:
+    name: Aggregate Option B windows
+    needs: train_b_windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Download fixed-split artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: samba-b-fixed
+          path: models
+      - name: Download all window artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: samba-b-window-*
+          path: models
+          merge-multiple: true
+      - name: Aggregate window results
+        env:
+          HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
+        run: python aggregate_windows.py --option B
       - name: Upload models to Hugging Face
         env:
           HF_TOKEN:       ${{ secrets.HF_TOKEN }}
@@ -76,9 +145,9 @@ jobs:
   predict_and_upload:
     name: Generate signals and upload
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    needs: [train_a, train_b]
-    if: always() && !cancelled() && needs.train_a.result == 'success' && needs.train_b.result == 'success'
+    timeout-minutes: 360
+    needs: [train_a, aggregate_b]
+    if: always() && !cancelled() && needs.train_a.result == 'success' && needs.aggregate_b.result == 'success'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
