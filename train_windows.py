@@ -2,7 +2,9 @@
 # 8 windows × 2 loss functions, winner = highest OOS ann return
 #
 # Usage:
-#   python train_windows.py --option both
+#   python train_windows.py --option both                  # legacy: all windows, serial, picks winner itself
+#   python train_windows.py --option B --window 3           # matrix mode: train ONLY window 3, persist
+#                                                             # results for aggregate_windows.py to combine later
 
 import argparse
 import json
@@ -110,6 +112,7 @@ def train_window(window: dict, feat_dict: dict, option: str,
     best_oos = -float("inf")
     patience = 0
     saved_any = False
+    run_t0 = time.time()
 
     for epoch in range(1, cfg.MAX_EPOCHS + 1):
         train_epoch(model, train_dl, optimizer, loss_fn)
@@ -130,6 +133,17 @@ def train_window(window: dict, feat_dict: dict, option: str,
             patience += 1
 
         if patience >= cfg.PATIENCE:
+            break
+
+        # Defense-in-depth: even with CI matrix parallelism giving each window
+        # its own job budget, nothing here bounds how long a single window/loss
+        # training run can take if early stopping never fires (e.g. persistently
+        # noisy oos_ann_ret). Hard-cap wall time per run so one bad run can't
+        # silently eat the whole job's timeout.
+        if time.time() - run_t0 > cfg.MAX_SECONDS_PER_TRAINING_RUN:
+            print(f"  Window {wid} loss={loss_fn}: hit "
+                  f"MAX_SECONDS_PER_TRAINING_RUN ({cfg.MAX_SECONDS_PER_TRAINING_RUN}s) "
+                  f"at epoch {epoch} — stopping early with best-so-far model.")
             break
 
     # If no model was saved, skip this window
@@ -157,6 +171,65 @@ def train_window(window: dict, feat_dict: dict, option: str,
         "scaler":        scaler,
     }
 
+
+# ── NEW: matrix mode — train exactly one window, persist artifacts for later ──
+# aggregation, instead of picking a winner itself. This is what CI matrix jobs
+# call, so each window/loss combo gets its own runner and its own 6-hour budget
+# instead of all 8 windows competing for one job's single 6-hour budget.
+
+def train_single_window_option(option: str, window_id: int) -> None:
+    t0 = time.time()
+    window = next((w for w in cfg.WINDOWS if w["id"] == window_id), None)
+    if window is None:
+        raise ValueError(
+            f"Window id {window_id} not found in cfg.WINDOWS "
+            f"(valid ids: {[w['id'] for w in cfg.WINDOWS]})"
+        )
+
+    print(f"\n{'='*60}")
+    print(f"SAMBA Window {window_id} (matrix mode) — "
+          f"Option {'A (FI)' if option == 'A' else 'B (Equity)'}")
+    print(f"{'='*60}")
+
+    master    = loader.load_master()
+    data      = loader.get_option_data(option, master)
+    feat_dict = feat.prepare_features(data)
+
+    any_result = False
+    for loss_fn in ["sharpe", "evar"]:
+        result = train_window(window, feat_dict, option, loss_fn)
+        if result is None:
+            print(f"  window={window_id} loss={loss_fn}: no result to persist")
+            continue
+
+        any_result = True
+
+        # Persist the scaler next to the model — the aggregator needs it to
+        # run inference with whichever window/loss combo ends up winning,
+        # and it has no access to this job's in-memory state.
+        scaler_path = os.path.join(
+            cfg.MODELS_DIR, f"scaler_option{option}_w{window_id}_{loss_fn}.pkl"
+        )
+        with open(scaler_path, "wb") as f:
+            pickle.dump(result["scaler"], f)
+
+        result_out = {k: v for k, v in result.items() if k != "scaler"}
+        result_path = os.path.join(
+            cfg.MODELS_DIR, f"result_option{option}_w{window_id}_{loss_fn}.json"
+        )
+        with open(result_path, "w") as f:
+            json.dump(result_out, f, indent=2)
+
+    if not any_result:
+        print(f"  Window {window_id}: BOTH loss functions failed/skipped — "
+              f"nothing persisted. The aggregator will simply not see this window.")
+
+    print(f"\n  Window {window_id} done in {time.time() - t0:.1f}s")
+
+
+# ── Legacy mode — train all windows serially in one job and pick the winner ──
+# itself. Kept for Option A (already fits well within the CPU-time limit) and
+# for local/manual runs; CI now uses the matrix-mode path above for Option B.
 
 def train_windows_option(option: str) -> dict:
     t0 = time.time()
@@ -291,8 +364,18 @@ def train_windows_option(option: str) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--option", choices=["A", "B", "both"], default="both")
+    parser.add_argument(
+        "--window", type=int, default=None,
+        help="Train only this single window id (matrix mode for CI parallelism). "
+             "Persists per-window/loss results for aggregate_windows.py to combine "
+             "afterwards. If omitted, trains all windows serially in this process "
+             "and picks the winner itself (legacy behavior)."
+    )
     args = parser.parse_args()
 
     options = ["A", "B"] if args.option == "both" else [args.option]
     for opt in options:
-        train_windows_option(opt)
+        if args.window is not None:
+            train_single_window_option(opt, args.window)
+        else:
+            train_windows_option(opt)
