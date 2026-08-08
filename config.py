@@ -58,6 +58,14 @@ LEARNING_RATE = 1e-3
 WEIGHT_DECAY  = 1e-4
 DROPOUT       = 0.2
 
+# Hard wall-clock cap (seconds) on any single training run (one window, one
+# loss function). Defense-in-depth alongside CI matrix parallelism — bounds
+# worst-case time even if early stopping never fires (e.g. persistently noisy
+# oos_ann_ret). 900s = 15 min; with MAX_EPOCHS=50 that's ~18s/epoch budget,
+# generous for this model size — raise if you see runs legitimately needing
+# more per epoch (e.g. after changing D_MODEL/lookback).
+MAX_SECONDS_PER_TRAINING_RUN = 900
+
 TRAIN_END    = "2024-12-31"
 LIVE_START   = "2025-01-01"
 
