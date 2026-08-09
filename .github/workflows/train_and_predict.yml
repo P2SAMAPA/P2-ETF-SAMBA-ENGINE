@@ -112,7 +112,7 @@ jobs:
     name: Aggregate Option B windows
     needs: train_b_windows
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -145,9 +145,17 @@ jobs:
   predict_and_upload:
     name: Generate signals and upload
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 60
     needs: [train_a, aggregate_b]
-    if: always() && !cancelled() && needs.train_a.result == 'success' && needs.aggregate_b.result == 'success'
+    # Run unless a job that WAS supposed to run actually failed. A 'skipped'
+    # result (e.g. train_a skipped because this run used option=B only) is
+    # fine — predict.py falls back to whatever models are already on HF for
+    # the option that wasn't retrained this run. Only a genuine 'failure' or
+    # 'cancelled' should block prediction.
+    if: >
+      always() && !cancelled() &&
+      needs.train_a.result != 'failure' &&
+      needs.aggregate_b.result != 'failure'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -156,6 +164,11 @@ jobs:
           cache: "pip"
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Download models from Hugging Face
+        env:
+          HF_TOKEN:       ${{ secrets.HF_TOKEN }}
+          HF_MODELS_REPO: ${{ secrets.HF_MODELS_REPO }}
+        run: python download_models.py
       - name: Generate signals for both options
         env:
           HF_TOKEN:        ${{ secrets.HF_TOKEN }}
